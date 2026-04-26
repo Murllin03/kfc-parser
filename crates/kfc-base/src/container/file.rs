@@ -177,6 +177,15 @@ impl KFCFile {
     }
 
     fn rebuild_resource_bundles(&mut self, type_registry: &TypeRegistry) {
+        // Build a fallback map from the original bundles already in the KFC file.
+        // This preserves internal_hash values for types that were added in a game
+        // update and are not yet known to the type registry (fixes game38 panic).
+        let original_internal_hashes: std::collections::HashMap<Hash32, Hash32> = self
+            .resource_bundles
+            .iter()
+            .map(|(k, v)| (*k, v.internal_hash))
+            .collect();
+
         let mut type_hashes = self
             .resources
             .keys()
@@ -185,14 +194,24 @@ impl KFCFile {
             .collect::<HashSet<_>>()
             .into_iter()
             .map(|hash| {
+                let internal_hash = type_registry
+                    .get_by_hash(LookupKey::Qualified(hash))
+                    .map(|t| t.internal_hash)
+                    .or_else(|| original_internal_hashes.get(&hash).copied())
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "[EML] Warning: type hash {:#010X} not found in registry; \
+                             internal_hash defaulting to 0. This type was likely added \
+                             in a recent game update.",
+                            hash
+                        );
+                        0
+                    });
+
                 (
                     hash,
                     ResourceBundleEntry {
-                        // TODO: Remove unwrap
-                        internal_hash: type_registry
-                            .get_by_hash(LookupKey::Qualified(hash))
-                            .unwrap()
-                            .internal_hash,
+                        internal_hash,
                         ..Default::default()
                     },
                 )
